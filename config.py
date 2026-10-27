@@ -25,5 +25,7 @@ PRIORITY_HIGH = 1
 PRIORITY_MEDIUM = 5
 PRIORITY_LOW = 10
 
-# TODO: create LOG_DIR and DATA_DIR if they don't exist
-#       hint -> os.makedirs(path, exist_ok=True)
+# Create the log and data folders if they don't exist yet.
+# exist_ok=True makes this safe to run on every import (no error if already there).
+for _path in (LOG_DIR, DATA_DIR):
+    os.makedirs(_path, exist_ok=True)

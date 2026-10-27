@@ -5,27 +5,44 @@ Custom exceptions (Exception Handling topic).
 
 
 class SchedulerError(Exception):
-    """Base class for all scheduler errors."""
-    # TODO: nothing needed, just `pass` — every custom error below inherits from this
+    """Base class for all scheduler errors.
+
+    Catching this one class catches every scheduler-specific error:
+        try:
+            scheduler.submit(task)
+        except SchedulerError as e:
+            ...
+    """
     pass
 
 
 class TaskExecutionError(SchedulerError):
-    # TODO: __init__(self, task_id, original_exc)
-    #       store both, call super().__init__(f"Task {task_id} failed: {original_exc}")
-    pass
+    """A task's function raised an exception while running."""
+
+    def __init__(self, task_id, original_exc):
+        self.task_id = task_id
+        self.original_exc = original_exc
+        super().__init__(f"Task {task_id} failed: {original_exc}")
 
 
 class MaxRetriesExceeded(SchedulerError):
-    # TODO: __init__(self, task_id, retries) -> message like "Task X gave up after N retries"
-    pass
+    """A task failed and has no retries left."""
+
+    def __init__(self, task_id, retries):
+        self.task_id = task_id
+        self.retries = retries
+        super().__init__(f"Task {task_id} gave up after {retries} retries")
 
 
 class SchedulerShutdownError(SchedulerError):
-    # TODO: raised when someone calls submit() after shutdown() was called
-    pass
+    """Raised when submit() is called after shutdown() was called."""
+
+    def __init__(self, message="Scheduler is shut down and no longer accepts tasks"):
+        super().__init__(message)
 
 
 class InvalidTaskError(SchedulerError):
-    # TODO: raised when a task has bad data (func not callable, negative priority etc.)
-    pass
+    """Raised when a task has bad data (func not callable, negative priority, etc.)."""
+
+    def __init__(self, message="Invalid task"):
+        super().__init__(message)
