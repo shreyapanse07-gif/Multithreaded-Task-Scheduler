@@ -21,44 +21,75 @@ class TaskDatabase:
     """
 
     def __init__(self, db_path=config.DB_FILE):
-        # TODO: self.db_path = db_path
-        # TODO: self._lock = threading.Lock()
-        # TODO: self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        #       ^ needed because workers (other threads) use the same connection
-        # TODO: self._create_tables()
-        pass
+        self.db_path = db_path
+        self._lock = threading.Lock()
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._create_tables()
 
     def _create_tables(self):
-        # TODO: CREATE TABLE IF NOT EXISTS ... for both tables (see docstring)
-        # TODO: commit
-        pass
+        with self._lock, self.conn:
+            self.conn.execute("""CREATE TABLE IF NOT EXISTS tasks (
+                task_id TEXT PRIMARY KEY, name TEXT, priority INTEGER, status TEXT,
+                run_at TEXT, retries INTEGER, max_retries INTEGER, created_at TEXT, error TEXT
+            )""")
+            self.conn.execute("""CREATE TABLE IF NOT EXISTS executions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT, worker TEXT,
+                started_at TEXT, finished_at TEXT, duration REAL, status TEXT, error TEXT,
+                FOREIGN KEY(task_id) REFERENCES tasks(task_id)
+            )""")
 
     def insert_task(self, task):
-        # TODO: with self._lock, self.conn:      <- `with conn` = auto commit / rollback (transaction)
-        #           self.conn.execute("INSERT OR REPLACE INTO tasks VALUES (?, ?, ...)", (...))
         # NEVER use f-strings for SQL values -> SQL injection; always use ? placeholders
-        pass
+        data = task.to_dict()
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (data["task_id"], data["name"], data["priority"], data["status"],
+                 data["run_at"], data["retries"], data["max_retries"],
+                 data["created_at"], data["error"]),
+            )
 
     def update_status(self, task):
-        # TODO: UPDATE tasks SET status=?, retries=?, error=?, run_at=? WHERE task_id=?
-        pass
+        with self._lock, self.conn:
+            self.conn.execute(
+                "UPDATE tasks SET status=?, retries=?, error=?, run_at=? WHERE task_id=?",
+                (task.status.value, task.retries, task.error,
+                 task.run_at.isoformat(), task.task_id),
+            )
 
     def log_run(self, task, worker_name, duration):
-        # TODO: INSERT INTO executions (...) VALUES (?, ?, ?, ?, ?, ?, ?)
-        pass
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO executions (task_id, worker, started_at, finished_at, duration, status, error) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (task.task_id, worker_name,
+                 task.started_at.isoformat() if task.started_at else None,
+                 task.finished_at.isoformat() if task.finished_at else None,
+                 duration, task.status.value, task.error),
+            )
 
     def get_task(self, task_id):
-        # TODO: SELECT * FROM tasks WHERE task_id=?  -> fetchone()
-        pass
+        with self._lock:
+            return self.conn.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
 
     def get_history(self, task_id=None, limit=50):
-        # TODO: SELECT from executions, optional WHERE task_id=?, ORDER BY id DESC LIMIT ?
-        pass
+        with self._lock:
+            if task_id is None:
+                return self.conn.execute(
+                    "SELECT * FROM executions ORDER BY id DESC LIMIT ?", (limit,)
+                ).fetchall()
+            return self.conn.execute(
+                "SELECT * FROM executions WHERE task_id=? ORDER BY id DESC LIMIT ?",
+                (task_id, limit),
+            ).fetchall()
 
     def get_summary(self):
-        # TODO: SELECT status, COUNT(*) FROM tasks GROUP BY status -> return dict
-        pass
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT status, COUNT(*) FROM tasks GROUP BY status"
+            ).fetchall()
+            return {status: count for status, count in rows}
 
     def close(self):
-        # TODO: with self._lock: self.conn.close()
-        pass
+        with self._lock:
+            self.conn.close()

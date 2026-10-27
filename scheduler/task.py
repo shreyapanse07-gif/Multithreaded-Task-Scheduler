@@ -12,9 +12,13 @@ import config
 
 
 class TaskStatus(Enum):
-    # TODO: define states -> PENDING, SCHEDULED, RUNNING, SUCCESS, FAILED, RETRYING, CANCELLED
-    #       hint -> PENDING = "pending" etc. (string values are easy to store in SQLite)
-    pass
+    PENDING = "pending"
+    SCHEDULED = "scheduled"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+    RETRYING = "retrying"
+    CANCELLED = "cancelled"
 
 
 # tie-breaker counter so two tasks with same priority + time don't get compared by func
@@ -42,62 +46,85 @@ class Task:
     def __init__(self, name, func, args=(), kwargs=None,
                  priority=config.PRIORITY_MEDIUM, delay_seconds=0,
                  interval=None, max_retries=config.MAX_RETRIES):
-        # TODO: assign all attributes listed above
-        # hint -> self.run_at = datetime.now() + timedelta(seconds=delay_seconds)
-        # hint -> self.kwargs = kwargs or {}   (never use {} as a default argument)
-        pass
+        self.task_id = str(uuid.uuid4())[:8]
+        self.name = name
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs or {}
+        self.priority = priority
+        self.run_at = datetime.now() + timedelta(seconds=delay_seconds)
+        self.interval = interval
+        self.max_retries = max_retries
+        self.retries = 0
+        self.status = TaskStatus.PENDING
+        self.result = None
+        self.error = None
+        self.created_at = datetime.now()
+        self.started_at = None
+        self.finished_at = None
+        self._seq = next(_counter)
+        self.is_io = False
 
     def __lt__(self, other):
-        # TODO: PriorityQueue needs this to compare tasks
-        # logic -> compare (priority, run_at, _seq) tuples
-        pass
+        return (self.priority, self.run_at, self._seq) < (other.priority, other.run_at, other._seq)
 
     def is_due(self):
-        # TODO: return True if datetime.now() >= self.run_at
-        pass
+        return datetime.now() >= self.run_at
 
     def is_recurring(self):
-        # TODO: return True if self.interval is not None
-        pass
+        return self.interval is not None
 
     def can_retry(self):
-        # TODO: return True if self.retries < self.max_retries
-        pass
+        return self.retries < self.max_retries
 
     def execute(self):
         """Run the actual function. Worker calls this; DON'T catch exceptions here —
         let them bubble up so the worker can decide retry/fail."""
-        # TODO: set status RUNNING, started_at = now
-        # TODO: self.result = self.func(*self.args, **self.kwargs)
-        # TODO: set status SUCCESS, finished_at = now, return result
-        pass
+        self.status = TaskStatus.RUNNING
+        self.started_at = datetime.now()
+        try:
+            self.result = self.func(*self.args, **self.kwargs)
+        finally:
+            self.finished_at = datetime.now()
+        self.status = TaskStatus.SUCCESS
+        return self.result
 
     def reschedule(self):
-        # TODO: for recurring tasks -> run_at += timedelta(seconds=interval),
-        #       reset status to SCHEDULED, retries = 0, new _seq
-        pass
+        if self.is_recurring():
+            self.run_at += timedelta(seconds=self.interval)
+            self.status = TaskStatus.SCHEDULED
+            self.retries = 0
+            self._seq = next(_counter)
 
     def to_dict(self):
-        # TODO: return dict of fields for DB / logging
-        #       hint -> status.value, run_at.isoformat()
-        pass
+        return {
+            "task_id": self.task_id,
+            "name": self.name,
+            "priority": self.priority,
+            "status": self.status.value,
+            "run_at": self.run_at.isoformat(),
+            "retries": self.retries,
+            "max_retries": self.max_retries,
+            "created_at": self.created_at.isoformat(),
+            "error": self.error,
+        }
 
     def __repr__(self):
-        # TODO: f"<Task {self.task_id} {self.name} p={self.priority} {self.status.name}>"
-        pass
+        return f"<Task {self.task_id} {self.name} p={self.priority} {self.status.name}>"
 
 
 # ---------- Inheritance: specialised task types ----------
 
 class IOTask(Task):
     """Task that touches files/disk. Scheduler/worker will wrap it in the IO semaphore."""
-    # TODO: call super().__init__(...) and set self.is_io = True
-    #       (base Task should default is_io = False)
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.is_io = True
 
 
 class RecurringTask(Task):
     """Convenience subclass: forces interval to be given."""
-    # TODO: __init__(self, name, func, interval, **kw) -> super().__init__(name, func, interval=interval, **kw)
-    #       raise ValueError if interval <= 0
-    pass
+    def __init__(self, name, func, interval, **kw):
+        if interval <= 0:
+            raise ValueError("interval must be greater than zero")
+        super().__init__(name, func, interval=interval, **kw)
