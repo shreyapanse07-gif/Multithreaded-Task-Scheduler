@@ -12,7 +12,7 @@ Flask routes. The page polls these JSON endpoints every couple of seconds.
     POST /api/tasks/<id>/cancel    cancel a task that hasn't started
     POST /api/tasks/<id>/rerun     submit a copy of a finished task
     GET  /api/history              recent executions from SQLite
-    GET  /lab                      Concurrency Lab page
+    GET  /lab                      redirects to the Concurrency lab tab
     POST /api/lab/race             race condition with / without a Lock
     POST /api/lab/gil              sequential vs threads vs processes
     POST /api/lab/semaphore        semaphore timeline
@@ -21,7 +21,7 @@ import json
 import platform
 import threading
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request
 
 import config
 from scheduler import Task, IOTask, RecurringTask, TaskStatus
@@ -254,8 +254,7 @@ def create_app(scheduler, hidden_task_ids=()):
 
     @app.get("/lab")
     def lab_page():
-        return render_template("lab.html", hostname=platform.node(),
-                               workers=scheduler.num_workers)
+        return redirect("/#lab")          # the lab is a tab on the main page
 
     @app.post("/api/lab/race")
     def lab_race():

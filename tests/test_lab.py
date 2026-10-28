@@ -54,8 +54,13 @@ class TestLabAPI(unittest.TestCase):
         self.s.shutdown()
         os.remove(self.db_path)
 
-    def test_page_loads(self):
-        self.assertEqual(self.client.get("/lab").status_code, 200)
+    def test_lab_is_a_tab_on_the_main_page(self):
+        page = self.client.get("/").get_data(as_text=True)
+        self.assertIn('id="pane-lab"', page)
+        self.assertIn('id="r-unsafe"', page)
+        res = self.client.get("/lab")
+        self.assertEqual(res.status_code, 302)
+        self.assertTrue(res.headers["Location"].endswith("/#lab"))
 
     def test_race_endpoint(self):
         res = self.client.post("/api/lab/race", json={"threads": 4, "increments": 200, "use_lock": True})

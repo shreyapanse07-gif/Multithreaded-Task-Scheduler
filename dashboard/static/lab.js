@@ -1,6 +1,8 @@
 // Concurrency Lab front end: runs one experiment per button and draws the result.
 "use strict";
 
+(() => {
+
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Number(n).toLocaleString("en-IN");
 let gilChart, semChart;
@@ -17,7 +19,7 @@ async function post(path, body = {}) {
 // Disable the button and show "Running…" while an experiment runs.
 async function busy(button, msgEl, work) {
   const label = button.textContent;
-  document.querySelectorAll("main button").forEach((b) => (b.disabled = true));
+  document.querySelectorAll("#pane-lab button").forEach((b) => (b.disabled = true));
   button.textContent = "Running…";
   msgEl.textContent = "";
   try {
@@ -26,7 +28,7 @@ async function busy(button, msgEl, work) {
     msgEl.textContent = err.message;
   } finally {
     button.textContent = label;
-    document.querySelectorAll("main button").forEach((b) => (b.disabled = false));
+    document.querySelectorAll("#pane-lab button").forEach((b) => (b.disabled = false));
   }
 }
 
@@ -75,6 +77,7 @@ function makeGilChart() {
 }
 
 function speed(x) {
+  if (x >= 0.9 && x < 1.1) return `about the same speed (${x}×)`;
   return x >= 1 ? `${x}× faster` : `${x}× (slower)`;
 }
 
@@ -150,4 +153,16 @@ document.addEventListener("DOMContentLoaded", () => {
   $("g-run").addEventListener("click", (e) =>
     busy(e.currentTarget, $("g-msg"), async () => renderGil(await post("/api/lab/gil"))));
   $("s-run").addEventListener("click", (e) => runSem(e.currentTarget));
+
+  // Tabs: open the lab from /#lab, keep the address in sync, and redraw the
+  // charts when the tab is shown (a chart drawn while hidden has no size).
+  const labTab = $("tab-lab"), dashTab = $("tab-dash");
+  if (location.hash === "#lab") bootstrap.Tab.getOrCreateInstance(labTab).show();
+  labTab.addEventListener("shown.bs.tab", () => {
+    history.replaceState(null, "", "#lab");
+    gilChart.resize();
+    semChart.resize();
+  });
+  dashTab.addEventListener("shown.bs.tab", () => history.replaceState(null, "", location.pathname));
 });
+})();

@@ -13,8 +13,14 @@
   <div class="container-xl">
     <div class="d-flex align-items-center gap-3">
       <span class="navbar-brand fw-semibold me-0">Task Scheduler</span>
-      <a class="nav-link active fw-semibold" href="/">Dashboard</a>
-      <a class="nav-link text-secondary" href="/lab">Concurrency lab</a>
+      <ul class="nav nav-underline" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="tab-dash" data-bs-toggle="tab" data-bs-target="#pane-dash"
+                  type="button" role="tab" aria-controls="pane-dash" aria-selected="true">Dashboard</button></li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-lab" data-bs-toggle="tab" data-bs-target="#pane-lab"
+                  type="button" role="tab" aria-controls="pane-lab" aria-selected="false">Concurrency lab</button></li>
+      </ul>
     </div>
     <span class="small text-secondary">
       <span id="live-dot" class="dot dot-off"></span>
@@ -25,6 +31,9 @@
 </nav>
 
 <main class="container-xl py-4">
+<div class="tab-content">
+<div class="tab-pane fade show active" id="pane-dash" role="tabpanel" aria-labelledby="tab-dash">
+
 
   <!-- Counters -->
   <div class="row g-3 mb-3" id="counters">
@@ -166,6 +175,130 @@
       </table>
     </div>
   </div>
+</div><!-- /pane-dash -->
+
+<div class="tab-pane fade" id="pane-lab" role="tabpanel" aria-labelledby="tab-lab">
+  <p class="text-secondary mb-4 lab-intro">
+    Three live experiments that run real threads and processes on this computer.
+    Each one shows a concept the scheduler depends on.
+  </p>
+
+  <!-- 1. Race condition -->
+  <section class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>1 · Race condition and Lock</span>
+      <span class="small text-secondary fw-normal">threading.Thread, threading.Lock</span>
+    </div>
+    <div class="card-body">
+      <div class="row g-4">
+        <div class="col-lg-4">
+          <p class="small">Several threads each add 1 to the same counter many times.
+            Adding is really three steps: <b>read</b> the value, <b>add 1</b>, <b>write</b> it back.
+            If another thread runs between the read and the write, one update is overwritten and lost.</p>
+          <div class="row g-2 mb-3">
+            <div class="col-6"><label class="form-label" for="r-threads">Threads</label>
+              <input class="form-control form-control-sm" id="r-threads" type="number" min="2" max="16" value="8"></div>
+            <div class="col-6"><label class="form-label" for="r-incs">Adds per thread</label>
+              <input class="form-control form-control-sm" id="r-incs" type="number" min="100" max="5000" step="100" value="2000"></div>
+          </div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-outline-danger btn-sm flex-fill" id="r-unsafe">Run without lock</button>
+            <button class="btn btn-outline-success btn-sm flex-fill" id="r-safe">Run with lock</button>
+          </div>
+          <div class="small text-danger mt-2" id="r-msg"></div>
+        </div>
+        <div class="col-lg-8">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="result-box" id="r-box-unsafe">
+                <div class="result-title">Without lock</div>
+                <div class="result-empty">Not run yet</div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="result-box" id="r-box-safe">
+                <div class="result-title">With lock</div>
+                <div class="result-empty">Not run yet</div>
+              </div>
+            </div>
+          </div>
+          <div class="row g-3 mt-1">
+            <div class="col-md-6"><pre class="code"><span class="c"># unsafe</span>
+current = counter.value
+time.sleep(0)   <span class="c"># switch threads here</span>
+counter.value = current + 1</pre></div>
+            <div class="col-md-6"><pre class="code"><span class="c"># safe</span>
+with lock:
+    current = counter.value
+    time.sleep(0)
+    counter.value = current + 1</pre></div>
+          </div>
+          <p class="small text-secondary mb-0">
+            <code>time.sleep(0)</code> forces a thread switch at the worst moment, standing in for real work
+            such as a database call. Without it the bug still exists, but shows up only rarely, which makes it
+            hard to catch. The lock is correct every time, but slower: threads wait their turn.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. GIL -->
+  <section class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>2 · The GIL: threads vs processes</span>
+      <span class="small text-secondary fw-normal">concurrent.futures ThreadPoolExecutor / ProcessPoolExecutor</span>
+    </div>
+    <div class="card-body">
+      <div class="row g-4">
+        <div class="col-lg-4">
+          <p class="small">The same jobs are run three ways: one after another, with a thread pool,
+            and with a process pool. <b>CPU-heavy</b> jobs do maths the whole time.
+            <b>IO-heavy</b> jobs mostly wait, like a download or a disk read.</p>
+          <p class="small">Python's <b>GIL</b> (Global Interpreter Lock) lets only one thread run Python code
+            at a time. A thread that is waiting gives the GIL up; a thread doing maths keeps it.</p>
+          <button class="btn btn-primary btn-sm w-100" id="g-run">Run benchmark</button>
+          <div class="small text-secondary mt-2" id="g-info">Takes about 10 seconds.</div>
+          <div class="small text-danger mt-1" id="g-msg"></div>
+        </div>
+        <div class="col-lg-8">
+          <div class="chart-box"><canvas id="g-chart"></canvas></div>
+          <ul class="small mt-3 mb-0" id="g-summary"><li class="text-secondary">Run the benchmark to see results.</li></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Semaphore -->
+  <section class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>3 · Semaphore: limit how many run at once</span>
+      <span class="small text-secondary fw-normal">threading.Semaphore, threading.Barrier</span>
+    </div>
+    <div class="card-body">
+      <div class="row g-4">
+        <div class="col-lg-4">
+          <p class="small">All threads start at the same moment and want the same resource, for example the disk.
+            A semaphore lets only <b>N</b> threads in at a time; the rest wait outside until someone leaves.
+            The scheduler uses one so that at most 2 file jobs run together.</p>
+          <div class="row g-2 mb-3">
+            <div class="col-6"><label class="form-label" for="s-threads">Threads</label>
+              <input class="form-control form-control-sm" id="s-threads" type="number" min="2" max="12" value="8"></div>
+            <div class="col-6"><label class="form-label" for="s-limit">Semaphore limit</label>
+              <input class="form-control form-control-sm" id="s-limit" type="number" min="1" max="12" value="3"></div>
+          </div>
+          <button class="btn btn-primary btn-sm w-100" id="s-run">Run</button>
+          <div class="small text-danger mt-2" id="s-msg"></div>
+          <div class="row text-center g-2 mt-3" id="s-stats"></div>
+        </div>
+        <div class="col-lg-8">
+          <div class="chart-box chart-tall"><canvas id="s-chart"></canvas></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div><!-- /pane-lab -->
+</div><!-- /tab-content -->
 </main>
 
 <!-- Task details -->
@@ -182,5 +315,6 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
 <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+<script src="{{ url_for('static', filename='lab.js') }}"></script>
 </body>
 </html>
