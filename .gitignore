@@ -4,3 +4,4 @@ logs/*.log
 data/*.db
 data/backups/
 .venv/
+data/*.txt

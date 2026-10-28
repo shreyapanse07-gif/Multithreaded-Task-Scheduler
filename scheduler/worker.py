@@ -1,138 +1,134 @@
-"""Worker threads: the consumer side of the producer-consumer pattern.
-
-The dispatcher thread in ``scheduler.py`` is the producer. It puts
-``(priority, seq, task_id)`` tuples into a shared ``queue.PriorityQueue``.
-Each ``Worker`` thread takes the highest-priority item from that queue and
-calls the scheduler's execute callback, which runs the task and records the
-outcome. Workers never touch task state directly, so all state changes stay
-behind the scheduler's lock.
 """
+worker.py
+Worker thread = CONSUMER in the producer-consumer model.
+Topics: threading.Thread subclass, queue.get/task_done, Event, Semaphore, try/except/finally
 
-from __future__ import annotations
-
-import logging
+The Scheduler (producer) puts (priority, seq, task) tuples into a shared
+queue.PriorityQueue. Each Worker takes the highest-priority item, runs it and
+reports the result. Failures are sent back to the scheduler for a retry.
+"""
 import queue
 import threading
 import time
-from typing import Callable
+from datetime import datetime, timedelta
 
-log = logging.getLogger("scheduler.worker")
+import config
+from .task import TaskStatus
+from .exceptions import TaskExecutionError, MaxRetriesExceeded
+from .logger import get_logger
 
-# execute(task_id, worker_name) -> True if a task actually ran,
-# False if the item was skipped (for example, cancelled while queued).
-ExecuteFn = Callable[[str, str], bool]
+logger = get_logger(__name__)
 
 
 class Worker(threading.Thread):
-    """One worker thread. Subclasses ``threading.Thread`` and overrides ``run``."""
+    """
+    Constructor args (passed in by Scheduler):
+        worker_id      -> int
+        task_queue     -> queue.PriorityQueue  (shared, thread-safe)
+        stop_event     -> threading.Event      (set() = please stop)
+        io_semaphore   -> threading.Semaphore(config.MAX_CONCURRENT_IO)
+        stats_lock     -> threading.Lock       (protects the shared stats dict)
+        stats          -> dict {"completed": 0, "failed": 0, "retried": 0, ...}
+        db             -> TaskDatabase instance
+        retry_callback -> function(task) that sends a task back to the scheduler
+        retry_delay    -> base seconds before a retry (doubles each attempt)
+    """
 
-    def __init__(
-        self,
-        name: str,
-        ready_queue: queue.PriorityQueue,
-        execute: ExecuteFn,
-        stop_event: threading.Event,
-        poll_interval: float = 0.2,
-    ) -> None:
-        super().__init__(name=name, daemon=True)
-        self._ready_queue = ready_queue
-        self._execute = execute
-        self._stop_event = stop_event
-        self._poll_interval = poll_interval
+    def __init__(self, worker_id, task_queue, stop_event, io_semaphore,
+                 stats_lock, stats, db, retry_callback,
+                 retry_delay=config.RETRY_DELAY):
+        super().__init__(name=f"Worker-{worker_id}", daemon=True)
+        self.worker_id = worker_id
+        self.task_queue = task_queue
+        self.stop_event = stop_event
+        self.io_semaphore = io_semaphore
+        self.stats_lock = stats_lock
+        self.stats = stats
+        self.db = db
+        self.retry_callback = retry_callback
+        self.retry_delay = retry_delay
+        self.current_task = None
+        self.tasks_done = 0
 
-        # Stats are written by this thread and read by the dashboard thread,
-        # so they get their own small lock.
-        self._stats_lock = threading.Lock()
-        self._current_task: str | None = None
-        self._busy_since: float | None = None
-        self._tasks_done = 0
-        self._busy_seconds = 0.0
-        self._born = time.monotonic()
-
-    def run(self) -> None:
-        log.info("%s started", self.name)
-        while not self._stop_event.is_set():
+    def run(self):
+        """Main loop. Thread.start() calls this automatically."""
+        logger.info("%s started", self.name)
+        while not self.stop_event.is_set():
             try:
-                _priority, _seq, task_id = self._ready_queue.get(timeout=self._poll_interval)
+                _priority, _seq, task = self.task_queue.get(timeout=config.POLL_INTERVAL)
             except queue.Empty:
-                continue  # wake up regularly so shutdown is noticed
-
-            started = time.monotonic()
-            with self._stats_lock:
-                self._current_task = task_id
-                self._busy_since = started
-            ran = False
+                continue                          # wake up regularly to check stop_event
             try:
-                ran = self._execute(task_id, self.name)
-            except Exception:  # the callback should never raise; keep the thread alive if it does
-                log.exception("%s: unexpected error while executing %s", self.name, task_id)
+                if task.status == TaskStatus.CANCELLED:
+                    logger.info("%s skipped cancelled task %s", self.name, task.name)
+                else:
+                    self._process(task)
             finally:
-                elapsed = time.monotonic() - started
-                with self._stats_lock:
-                    self._current_task = None
-                    self._busy_since = None
-                    if ran:
-                        self._tasks_done += 1
-                        self._busy_seconds += elapsed
-                self._ready_queue.task_done()
-        log.info("%s stopped", self.name)
+                self.task_queue.task_done()       # ALWAYS, or queue.join() hangs
+        logger.info("%s stopped", self.name)
 
-    def snapshot(self) -> dict:
-        """Thread-safe view of this worker for the dashboard."""
-        now = time.monotonic()
-        with self._stats_lock:
-            busy = self._busy_seconds
-            if self._busy_since is not None:
-                busy += now - self._busy_since
-            alive_for = max(now - self._born, 1e-9)
-            return {
-                "name": self.name,
-                "alive": self.is_alive(),
-                "state": "busy" if self._current_task else "idle",
-                "current_task": self._current_task,
-                "tasks_done": self._tasks_done,
-                "busy_seconds": round(busy, 3),
-                "utilization": round(min(busy / alive_for, 1.0), 3),
-            }
+    def _process(self, task):
+        self.current_task = task
+        start = time.perf_counter()
+        try:
+            if getattr(task, "is_io", False):
+                with self.io_semaphore:           # at most MAX_CONCURRENT_IO IO tasks at once
+                    task.execute()
+            else:
+                task.execute()
+        except Exception as exc:                  # task failed -> retry or give up
+            self._on_failure(task, exc, time.perf_counter() - start)
+        else:
+            self._on_success(task, time.perf_counter() - start)
+        finally:
+            self.current_task = None
+            self.tasks_done += 1
 
+    def _on_success(self, task, duration):
+        with self.stats_lock:
+            self.stats["completed"] += 1
+        self._save(task, duration)
+        logger.info("%s finished %s in %.3fs", self.name, task.name, duration)
+        if task.is_recurring() and not self.stop_event.is_set():
+            task.reschedule()
+            self.retry_callback(task)
 
-class WorkerPool:
-    """A fixed-size group of ``Worker`` threads sharing one ready queue."""
+    def _on_failure(self, task, exc, duration):
+        task.error = f"{type(exc).__name__}: {exc}"
+        task.finished_at = task.finished_at or datetime.now()
+        if task.can_retry():
+            task.retries += 1
+            task.status = TaskStatus.RETRYING
+            # Exponential backoff: delay, 2*delay, 4*delay, ...
+            # Never time.sleep() here - that would block this worker.
+            wait = self.retry_delay * 2 ** (task.retries - 1)
+            task.run_at = datetime.now() + timedelta(seconds=wait)
+            with self.stats_lock:
+                self.stats["retried"] += 1
+            logger.warning("%s: %s - retry %d/%d in %.1fs", self.name,
+                           TaskExecutionError(task.task_id, exc), task.retries,
+                           task.max_retries, wait)
+            self._save(task, duration)
+            self.retry_callback(task)
+        else:
+            task.status = TaskStatus.FAILED
+            with self.stats_lock:
+                self.stats["failed"] += 1
+            logger.error("%s: %s (%s)", self.name,
+                         MaxRetriesExceeded(task.task_id, task.retries), task.error)
+            self._save(task, duration)
 
-    def __init__(
-        self,
-        num_workers: int,
-        ready_queue: queue.PriorityQueue,
-        execute: ExecuteFn,
-        name_prefix: str = "worker",
-        poll_interval: float = 0.2,
-    ) -> None:
-        if num_workers < 1:
-            raise ValueError("num_workers must be at least 1")
-        self._stop_event = threading.Event()
-        self._started = False
-        self.workers = [
-            Worker(f"{name_prefix}-{i + 1}", ready_queue, execute, self._stop_event, poll_interval)
-            for i in range(num_workers)
-        ]
+    def _save(self, task, duration):
+        try:
+            self.db.update_status(task)
+            self.db.log_run(task, self.name, round(duration, 4))
+        except Exception:                         # a DB problem must not kill the worker
+            logger.exception("%s could not save %s", self.name, task.task_id)
 
-    @property
-    def size(self) -> int:
-        return len(self.workers)
-
-    def start(self) -> None:
-        if self._started:
-            raise RuntimeError("WorkerPool already started")
-        self._started = True
-        for worker in self.workers:
-            worker.start()
-
-    def stop(self, timeout: float | None = 5.0) -> None:
-        """Ask workers to stop after their current task, then join them."""
-        self._stop_event.set()
-        for worker in self.workers:
-            if worker.is_alive():
-                worker.join(timeout)
-
-    def snapshot(self) -> list[dict]:
-        return [worker.snapshot() for worker in self.workers]
+    def snapshot(self):
+        """Small dict for the dashboard / summary."""
+        task = self.current_task
+        return {"name": self.name, "alive": self.is_alive(),
+                "state": "busy" if task else "idle",
+                "current_task": task.name if task else None,
+                "tasks_done": self.tasks_done}

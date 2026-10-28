@@ -22,7 +22,7 @@ from tasks.sample_tasks import (generate_report, backup_file, process_log_file,
 logger = get_logger("main")
 
 # Statuses after which a task will never run again.
-TERMINAL_STATES = {"COMPLETED", "FAILED", "CANCELLED"}
+TERMINAL_STATES = {"SUCCESS", "COMPLETED", "FAILED", "CANCELLED"}
 
 
 # --------------------------------------------------------------------------- #
@@ -147,7 +147,7 @@ def print_summary(scheduler):
     print(f"  {'ID':<10}{'NAME':<24}{'STATUS':<12}{'RETRIES'}")
     print("  " + "-" * 54)
     for task in list(scheduler.tasks.values()):
-        print(f"  {str(task.id)[:8]:<10}{task.name:<24}"
+        print(f"  {str(task.task_id)[:8]:<10}{task.name:<24}"
               f"{_status_name(task):<12}{task.retries}")
 
 
