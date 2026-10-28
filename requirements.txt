@@ -1,2 +1,4 @@
-# Only standard library is used: threading, queue, heapq, sqlite3, logging, datetime, unittest
-# TODO (optional): pytest  -> nicer test output
+# The scheduler itself only uses the standard library.
+# These two are for the web dashboard (python app.py):
+flask>=3.0
+psutil>=5.9

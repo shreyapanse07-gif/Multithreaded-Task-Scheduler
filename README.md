@@ -39,8 +39,31 @@ Recurring success → reschedule() → waiting heap
 4. worker.py → scheduler.py (+ test_scheduler.py)
 5. decorators.py → sample_tasks.py → main.py
 
+## Setup
+```
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+source .venv/bin/activate        # macOS / Linux
+pip install -r requirements.txt
+```
+
 ## Run
 ```
-python main.py
+python app.py                    # web dashboard -> http://127.0.0.1:5000
+python main.py                   # console demos (priorities, retries, recurring, benchmark)
 python -m unittest discover tests -v
 ```
+
+## Web dashboard
+`app.py` starts the scheduler once, then a Flask dashboard (only reachable from this computer).
+- Live CPU / memory / disk / uptime and top processes (psutil), collected by a recurring task every 3 s
+- Create tasks from a fixed list of jobs: system snapshot, top processes, disk report,
+  system health report (saved to `data/reports/`), folder scan, file checksum (SHA-256),
+  file backup, log analysis, and a sequential-vs-threaded benchmark (concurrent.futures)
+- High / Medium / Low priority, delay, retries, repeat interval
+- Task list with status filter, details (result + every attempt), cancel and run again
+- Worker status, tasks-by-status chart, recent executions from SQLite
+
+Files: `app.py`, `dashboard/web.py` (routes), `dashboard/jobs.py` (allowed jobs),
+`dashboard/templates/index.html`, `dashboard/static/`, `tasks/system_tasks.py` (psutil jobs).
+Users can only pick jobs from `dashboard/jobs.py`; the dashboard never runs code sent from the browser.

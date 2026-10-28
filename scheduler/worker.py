@@ -69,6 +69,7 @@ class Worker(threading.Thread):
 
     def _process(self, task):
         self.current_task = task
+        task.worker = self.name                   # shown on the dashboard
         start = time.perf_counter()
         try:
             if getattr(task, "is_io", False):
