@@ -12,15 +12,21 @@ Flask routes. The page polls these JSON endpoints every couple of seconds.
     POST /api/tasks/<id>/cancel    cancel a task that hasn't started
     POST /api/tasks/<id>/rerun     submit a copy of a finished task
     GET  /api/history              recent executions from SQLite
+    GET  /lab                      Concurrency Lab page
+    POST /api/lab/race             race condition with / without a Lock
+    POST /api/lab/gil              sequential vs threads vs processes
+    POST /api/lab/semaphore        semaphore timeline
 """
 import json
 import platform
+import threading
 
 from flask import Flask, jsonify, render_template, request
 
 import config
 from scheduler import Task, IOTask, RecurringTask, TaskStatus
 from tasks.system_tasks import get_metrics_history, get_latest_processes
+from lab import experiments
 from .jobs import JOBS, job_list
 
 PRIORITIES = {"high": config.PRIORITY_HIGH,
@@ -108,6 +114,16 @@ def build_task(data):
         task = Task(name, job["func"], **common)
     task.job, task.param = key, param
     return task
+
+
+def _int_field(data, key, default, low, high):
+    try:
+        value = int(data.get(key, default))
+    except (TypeError, ValueError):
+        raise BadRequest(f"{key} must be a whole number") from None
+    if not low <= value <= high:
+        raise BadRequest(f"{key} must be between {low} and {high}")
+    return value
 
 
 def create_app(scheduler, hidden_task_ids=()):
@@ -222,5 +238,42 @@ def create_app(scheduler, hidden_task_ids=()):
             if len(result) == 25:
                 break
         return jsonify(result)
+
+    # ---------------------------------------------------------- Concurrency Lab
+    # One experiment at a time, otherwise they slow each other down and the
+    # numbers mean nothing. acquire(blocking=False) -> answer "busy" at once.
+    lab_lock = threading.Lock()
+
+    def run_experiment(fn, **kwargs):
+        if not lab_lock.acquire(blocking=False):
+            return jsonify(error="Another experiment is running - try again in a moment"), 409
+        try:
+            return jsonify(fn(**kwargs))
+        finally:
+            lab_lock.release()
+
+    @app.get("/lab")
+    def lab_page():
+        return render_template("lab.html", hostname=platform.node(),
+                               workers=scheduler.num_workers)
+
+    @app.post("/api/lab/race")
+    def lab_race():
+        data = request.get_json(silent=True) or {}
+        return run_experiment(experiments.race_condition,
+                              threads=_int_field(data, "threads", 8, 2, 16),
+                              increments=_int_field(data, "increments", 2000, 100, 5000),
+                              use_lock=bool(data.get("use_lock")))
+
+    @app.post("/api/lab/gil")
+    def lab_gil():
+        return run_experiment(experiments.gil_benchmark, job_seconds=0.5, cpu_job_seconds=0.8)
+
+    @app.post("/api/lab/semaphore")
+    def lab_semaphore():
+        data = request.get_json(silent=True) or {}
+        threads = _int_field(data, "threads", 8, 2, 12)
+        return run_experiment(experiments.semaphore_demo, threads=threads,
+                              limit=_int_field(data, "limit", 3, 1, threads))
 
     return app

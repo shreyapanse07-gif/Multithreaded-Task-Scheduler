@@ -28,3 +28,18 @@ body { background: #f4f5f7; font-size: 0.9rem; }
 
 pre.result { background: #f8f9fa; border: 1px solid #e2e4e8; padding: 0.75rem;
              font-size: 0.78rem; max-height: 320px; overflow: auto; white-space: pre-wrap; }
+
+/* ---------- Concurrency lab ---------- */
+.nav-link { font-size: 0.85rem; padding: 0.25rem 0; }
+.lab-intro { max-width: 720px; }
+.result-box { border: 1px solid #e2e4e8; border-radius: 6px; padding: 0.9rem 1rem; height: 100%; background: #fff; }
+.result-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; color: #6c757d; margin-bottom: 0.4rem; }
+.result-empty { color: #adb5bd; padding: 1rem 0; }
+.result-big { font-size: 1.8rem; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.result-line { font-size: 0.8rem; color: #495057; font-variant-numeric: tabular-nums; }
+.box-bad { border-left: 4px solid #dc3545; }
+.box-good { border-left: 4px solid #198754; }
+pre.code { background: #f8f9fa; border: 1px solid #e2e4e8; border-radius: 4px; padding: 0.6rem 0.75rem;
+           font-size: 0.78rem; margin-bottom: 0.75rem; }
+pre.code .c { color: #6c757d; }
+.chart-tall { height: 300px; }

@@ -67,3 +67,10 @@ python -m unittest discover tests -v
 Files: `app.py`, `dashboard/web.py` (routes), `dashboard/jobs.py` (allowed jobs),
 `dashboard/templates/index.html`, `dashboard/static/`, `tasks/system_tasks.py` (psutil jobs).
 Users can only pick jobs from `dashboard/jobs.py`; the dashboard never runs code sent from the browser.
+
+## Concurrency lab (http://127.0.0.1:5000/lab)
+Three live experiments, code in `lab/experiments.py`:
+1. **Race condition**: threads update a shared counter without and with a `Lock`; shows lost updates vs an exact total.
+2. **GIL**: the same jobs run sequentially, with `ThreadPoolExecutor` and with `ProcessPoolExecutor`,
+   for CPU-heavy and IO-heavy work. Threads only help IO work; processes help CPU work.
+3. **Semaphore**: threads start together (`Barrier`) and queue for a `Semaphore`; a timeline shows who waited and who ran.

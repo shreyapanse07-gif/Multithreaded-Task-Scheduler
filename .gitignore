@@ -6,3 +6,4 @@ data/backups/
 .venv/
 data/*.txt
 data/reports/
+data/*.db-journal
